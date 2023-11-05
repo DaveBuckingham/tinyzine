@@ -1,0 +1,75 @@
+#!/usr/bin/perl
+use warnings;
+use strict;
+use GD;
+use PDF::API2;
+
+
+my $DPI = 300;
+
+my $PAGE_WIDTH_INCHES = 8.5;
+my $PAGE_WIDTH_DOTS = $PAGE_WIDTH_INCHES * $DPI;
+my $PAGE_WIDTH_POINTS = $PAGE_WIDTH_INCHES * 72;
+
+my $PAGE_HEIGHT_INCHES = 11;
+my $PAGE_HEIGHT_DOTS = $PAGE_HEIGHT_INCHES * $DPI;
+my $PAGE_HEIGHT_POINTS = $PAGE_HEIGHT_INCHES * 72;
+
+my $img = GD::Image->new($PAGE_WIDTH_DOTS, $PAGE_HEIGHT_DOTS);
+
+my $BACKGROUND_COLOR = $img->colorAllocate(255,255,255);
+my $LINE_COLOR = $img->colorAllocate(0,0,0);
+
+my $even = 1;
+my $str = "";
+
+
+
+for my $margin (0.15, 0.2, .3, .4, .5, .6, .7, .8, .9, 1.0) {
+#for my $margin (0.13, 0.14, 0.15, 0.16, 0.17, 0.18, 0.19, 0.20) {
+#for my $margin (0.1, 0.12, 0.14, 0.16, 0.18, 0.2, 0.22, 0.24, 0.26) {
+#for my $margin (0.09, 0.11, 0.13, 0.15, 0.17, 0.19, 0.21, 0.23, 0.25) {
+    my $m = $margin * $DPI;
+    my $top = $m;
+    my $left = $m;
+    my $right = $PAGE_WIDTH_DOTS - $m;
+    my $bottom = $PAGE_HEIGHT_DOTS - $m;
+
+    if ($even) {
+        $img->line($left, $top, $right, $top, $LINE_COLOR);
+        $img->line($right, $top, $right, $bottom, $LINE_COLOR);
+        $img->line($right, $bottom, $left, $bottom, $LINE_COLOR);
+        $img->line($left, $bottom, $left, $top, $LINE_COLOR);
+    }
+    else {
+        $img->dashedLine($left, $top, $right, $top, $LINE_COLOR);
+        $img->dashedLine($right, $top, $right, $bottom, $LINE_COLOR);
+        $img->dashedLine($right, $bottom, $left, $bottom, $LINE_COLOR);
+        $img->dashedLine($left, $bottom, $left, $top, $LINE_COLOR);
+    }
+
+    $even = !$even;
+    $str .= $margin;
+    $str .= "   ";
+}
+
+$img->string(gdGiantFont, ($PAGE_WIDTH_DOTS / 2) - 50, $PAGE_HEIGHT_DOTS / 2, $str, $LINE_COLOR);
+
+
+open my $fh,">","front.png" or die "$!";
+binmode $fh;
+print $fh $img->png;
+close($fh);
+
+my $pdf = PDF::API2->new();
+
+my $p = $pdf->page();
+$p->mediabox($PAGE_WIDTH_POINTS, $PAGE_HEIGHT_POINTS);
+my $gfx = $p->gfx();
+my $png = $pdf->image_png("front.png"); 
+$gfx->image($png,0,0,$PAGE_WIDTH_POINTS,$PAGE_HEIGHT_POINTS);
+
+$pdf->saveas("margins.pdf");
+
+
+

@@ -1,0 +1,328 @@
+#!/usr/bin/perl
+use warnings;
+use strict;
+use PDF::API2;
+
+use constant {
+    TEMPLATE   => 1,
+    DRAW       => 2,
+    ZINE       => 3,
+};
+
+my $target = DRAW;
+
+
+# FOR OFF-CENTER PRINTERS
+my $VERTICAL_OFFSET = 0;
+my $HORIZONTAL_OFFSET_FRONT;
+my $HORIZONTAL_OFFSET_BACK;
+
+my $MARGIN                 = 13;
+my $BOX_RATIO              = 0.72;
+my $LINE_WIDTH             = 0.6;
+
+my $inner_spread           = 0;
+
+my $PARTIAL_CUTS           = 1;
+my $PARTIAL_CUT_LENGTH     = 5;
+
+my $SHOW_BOXES;
+my $SHOW_LABELS;
+
+my $LIGHT_GRAY = '#e5e5e5';
+my $DARK_GRAY = '#909090';
+
+my $CUT_COLOR   = $DARK_GRAY;
+my $LABEL_COLOR = $LIGHT_GRAY;
+my $BOX_COLOR   = $LIGHT_GRAY;
+
+
+my $PAGE_WIDTH  = 8.5 * 72;
+my $PAGE_HORIZONTAL_CENTER  = $PAGE_WIDTH / 2.0;
+my $PAGE_HEIGHT = 11 * 72;
+
+my $BINDING_OFFSET   = 1;   # THIN PAPER
+
+my $ROW_HEIGHT     = $PAGE_HEIGHT / 4;
+my $BOX_HEIGHT     = $ROW_HEIGHT - (2 * $MARGIN);
+my $BOX_WIDTH      = $BOX_HEIGHT * $BOX_RATIO;
+
+my $LABEL_SIZE      = 30;
+my $LABEL_X = ($BOX_WIDTH / 2) - 10;
+my $LABEL_Y = ($BOX_HEIGHT / 2);
+
+my $COVER_SCALE = 1;
+
+
+if ($target == ZINE) {
+    $HORIZONTAL_OFFSET_FRONT = 2;
+    $HORIZONTAL_OFFSET_BACK  = -2;
+    $SHOW_BOXES              = 0;
+    $SHOW_LABELS             = 0;
+    $COVER_SCALE             = 1.075;
+}
+elsif ($target == TEMPLATE) {
+    $HORIZONTAL_OFFSET_FRONT = 0;
+    $HORIZONTAL_OFFSET_BACK  = 0;
+    $SHOW_BOXES              = 1;
+    $SHOW_LABELS             = 1;
+    $PARTIAL_CUTS            = 0;
+}
+elsif ($target == DRAW) {
+    $HORIZONTAL_OFFSET_FRONT = 0;
+    $HORIZONTAL_OFFSET_BACK  = 0;
+    $SHOW_BOXES              = 1;
+    $SHOW_LABELS             = 0;
+}
+else {
+    die;
+}
+
+my @FRONT_LABELS = ([ 9, 22, 1, 30],
+                    [11, 20, 3, 28],
+                    [13, 18, 5, 26],
+                    [15, 16, 7, 24]);
+
+my @BACK_LABELS =  ([ 'b', 'f', 23, 8],
+                    [ 29,   2,  21, 10],
+                    [ 27,   4,  19, 12],
+                    [ 25,   6,  17, 14]);
+
+my @LABELS = (@FRONT_LABELS, @BACK_LABELS);
+
+my $zine_pages = $ARGV[0];
+
+my %box_ratios = ();
+my %box_dimensions = ();
+
+
+
+sub compute_box {
+
+    my ($row, $col) = @_;
+    my $label = $LABELS[$row][$col];
+    #my $offset = (1,2,3,4,-1,-2,-3,-4)[$row] * $BINDING_OFFSET;
+    my $offset = ($row < 4 ? -1 : 1) * $BINDING_OFFSET ;
+    my $cut_x = $PAGE_HORIZONTAL_CENTER + $offset;
+
+
+    my $top = $PAGE_HEIGHT - $MARGIN - ($ROW_HEIGHT * ($row % 4));
+
+
+    my $left = ($MARGIN,
+                $cut_x - $MARGIN - $BOX_WIDTH,
+                $cut_x + $MARGIN,
+                $PAGE_WIDTH - $MARGIN - $BOX_WIDTH)[$col];
+    my $bottom = $top - ($BOX_HEIGHT * ($label eq 'f' ? $COVER_SCALE : 1));
+
+    my $right;
+        if (($label eq '15') && $inner_spread) {
+            my ($l, $b, $r, $t) = compute_box($row, $col+1);
+            $right = $r;
+        }
+        else {
+            $right = $left + $BOX_WIDTH;
+        }
+
+    my $ratio = ($right - $left) / ($top - $bottom);
+    $box_ratios{$ratio} = 1;
+    my $height = ($top - $bottom) / 72;
+    my $width = ($right - $left) / 72;
+    $box_dimensions{$width . "x" . $height} = 1;
+
+    my $H_OFFSET = $row < 4 ? $HORIZONTAL_OFFSET_FRONT : $HORIZONTAL_OFFSET_BACK;
+
+    return ($left+$H_OFFSET, $bottom+$VERTICAL_OFFSET, $right+$H_OFFSET, $top+$VERTICAL_OFFSET);
+}
+
+
+sub draw_box {
+    my ($page, $row, $col, $font) = @_;
+    my ($left, $bottom, $right, $top) = compute_box($row, $col);
+    my $label = $LABELS[$row][$col];
+
+    if (!($label eq '16' & $inner_spread)) {
+            my $img = $page->graphics();
+            $img->line_dash_pattern();
+            $img->stroke_color($BOX_COLOR);
+            $img->rectangle($left, $bottom, $right, $top);
+            $img->line_width($LINE_WIDTH);
+            $img->stroke();
+    }
+
+    if ($SHOW_LABELS) {
+        my $txt = $page->text();
+        $txt->font($font, 16);
+        $txt->stroke_color($LABEL_COLOR);
+        $txt->fill_color($LABEL_COLOR);
+        #$txt->position($left + ($BOX_WIDTH / 2) - 10, $bottom + ($BOX_HEIGHT / 2));
+        $txt->position($left + $LABEL_X, $bottom + $LABEL_Y);
+        $txt->text($label);
+    }
+}
+
+sub draw_horizontal_cut {
+    my ($page, $row) = @_;
+    my $img = $page->graphics();
+    $img->line_dash_pattern(4);
+    $img->stroke_color($CUT_COLOR);
+    $img->line_width($LINE_WIDTH);
+    my $cut_y = $ROW_HEIGHT * ($row % 4);
+    my $H_OFFSET = $row < 4 ? $HORIZONTAL_OFFSET_FRONT : $HORIZONTAL_OFFSET_BACK;
+    $img->move($MARGIN+$H_OFFSET, $cut_y+$VERTICAL_OFFSET);
+    $img->line($PAGE_WIDTH + $H_OFFSET - $MARGIN, $cut_y+$VERTICAL_OFFSET);
+    $img->line_width($LINE_WIDTH);
+    $img->stroke();
+}
+
+
+sub draw_vertical_cut {
+    my ($page, $row) = @_;
+    #my $offset = (1,2,3,4,-1,-2,-3,-4)[$row] * $BINDING_OFFSET;
+    my $offset = ($row < 4 ? -1 : 1) * $BINDING_OFFSET ;
+    my $img = $page->graphics();
+    $img->line_dash_pattern(4);
+    $img->stroke_color($CUT_COLOR);
+    $img->line_width($LINE_WIDTH);
+    my $cut_y = $ROW_HEIGHT * ($row % 4);
+    my $cut_x = $PAGE_HORIZONTAL_CENTER + $offset;
+    my $dest_y = $cut_y + $ROW_HEIGHT;
+    $dest_y = $dest_y > $PAGE_HEIGHT - $MARGIN ? $PAGE_HEIGHT - $MARGIN : $dest_y;
+    $cut_y = $cut_y < $MARGIN ? $MARGIN : $cut_y;
+    my $H_OFFSET = $row < 4 ? $HORIZONTAL_OFFSET_FRONT : $HORIZONTAL_OFFSET_BACK;
+    $img->move($cut_x + $H_OFFSET, $cut_y + $VERTICAL_OFFSET);
+    $img->line($cut_x + $H_OFFSET, $dest_y + $VERTICAL_OFFSET);
+    $img->line_width($LINE_WIDTH);
+    $img->stroke();
+}
+
+
+
+sub add_zine_page {
+    my ($letter_page, $row, $col, $zine_page) = @_;
+
+    my ($x, $y, $right, $top) = compute_box($row, $col);
+    my $box_w = $right - $x;
+    my $box_h = $top - $y;
+
+    my $image_r = $zine_page->width / $zine_page->height;
+    my $box_r = $box_w / $box_h;
+
+    my $width = $box_h * $image_r;
+
+    my $centering_offset = ($box_w - $width) / 2;
+    $letter_page->object($zine_page, $x + $centering_offset, $y, $width);
+}
+
+sub draw_partial_cuts {
+    my ($letter_page) = @_;
+    my $img = $letter_page->graphics();
+    $img->stroke_color($CUT_COLOR);
+    $img->line_width($LINE_WIDTH);
+    my $cut_x;
+    my $cut_y;
+
+    for my $row (1,2,3) {
+        $cut_y = ($ROW_HEIGHT * $row) + $VERTICAL_OFFSET;
+
+        $cut_x = $MARGIN + $HORIZONTAL_OFFSET_FRONT;
+        $img->move($cut_x, $cut_y);
+        $img->line($cut_x + $PARTIAL_CUT_LENGTH, $cut_y);
+
+        $cut_x = ($PAGE_HORIZONTAL_CENTER - $BINDING_OFFSET - $PARTIAL_CUT_LENGTH) + $HORIZONTAL_OFFSET_FRONT;
+        $img->move($cut_x, $cut_y);
+        $img->line($cut_x + ($PARTIAL_CUT_LENGTH * 2), $cut_y);
+
+        $cut_x = ($PAGE_WIDTH - $MARGIN - $PARTIAL_CUT_LENGTH) + $HORIZONTAL_OFFSET_FRONT;
+        $img->move($cut_x, $cut_y);
+        $img->line($cut_x + $PARTIAL_CUT_LENGTH, $cut_y);
+
+    }
+    $cut_x = $PAGE_HORIZONTAL_CENTER + $HORIZONTAL_OFFSET_FRONT - $BINDING_OFFSET;
+    $cut_y = $MARGIN + $VERTICAL_OFFSET;
+    $img->move($cut_x, $cut_y);
+    $img->line($cut_x, $cut_y + $PARTIAL_CUT_LENGTH);
+
+    $cut_y = ($PAGE_HEIGHT - $MARGIN - $PARTIAL_CUT_LENGTH) + $VERTICAL_OFFSET;
+    $img->move($cut_x, $cut_y);
+    $img->line($cut_x, $cut_y + $PARTIAL_CUT_LENGTH);
+
+    $img->stroke();
+}
+
+
+sub increase_contrast {
+    my ($fn) = @_;
+    `convert $fn -set colorspace Gray -separate -average -brightness-contrast 0x25 temp.png`;
+    return 'temp.png';
+}
+
+
+# MAKE PDF
+
+
+my $pdf = PDF::API2->new();
+my $font = $pdf->font('/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf');
+
+my $front = $pdf->page();
+my $back = $pdf->page();
+
+$front->boundaries(media => '8.5x11', trim=>$MARGIN);
+$back->boundaries(media => '8.5x11', trim=>$MARGIN);
+
+if ($zine_pages) {
+    $inner_spread = !-e "$zine_pages/page_16.png";
+    for my $row (0,1,2,3,4,5,6,7) {
+        for my $col (0,1,2,3) {
+            my $letter_page = $row < 4 ? $front : $back;
+            my $label = $LABELS[$row][$col];
+            my $fn = "$zine_pages/page_$label.png";
+            if (!-e $fn) {
+                print "file not found: $fn\n";
+            }
+            else {
+                my $darkened = increase_contrast($fn);
+                my $zine_page = $pdf->image($darkened); 
+                unlink($darkened) or die "could not delete temp file\n";
+                add_zine_page($letter_page, $row, $col, $zine_page);
+            }
+        }
+    }
+}
+
+if ($PARTIAL_CUTS) {
+    draw_partial_cuts($front);
+}
+else {
+    for my $row (0,1,2,3) {
+        if ($row > 0) {
+            draw_horizontal_cut($front, $row);
+        }
+        draw_vertical_cut($front, $row);
+    }
+}
+
+if ($SHOW_BOXES){
+    for my $col (0,1,2,3) {
+        for my $row (0,1,2,3) {
+            draw_box($front, $row, $col, $font);
+        }
+        for my $row (4,5,6,7) {
+            draw_box($back, $row, $col, $font);
+        }
+    }
+}
+
+
+$pdf->saveas("out.pdf");
+
+print "box ratios:\n";
+for (keys(%box_ratios)) {
+    print "$_\n";
+}
+print "box dimensions:\n";
+for (keys(%box_dimensions)) {
+    print "$_\n";
+}
+
+

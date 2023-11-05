@@ -1,0 +1,14 @@
+This is my layout tool for publishing my zine (tinyadventurezine.com).
+
+A zine is printed on a single two-sided sheet of 8.5/11 paper. 16 zine pages aranged in a grid on each side,
+for a tole of 32 zine pages per sheet of paper, including the front and back covers. Then you cut it up and
+arrange and staple the zine pages together to make a booklet. For more explanation, look under the "Make your own"
+section at tinyadventurezine.com.
+
+The main function of this tool is to go through a directy containing (approximately) 32 images
+and arange them in a two-page pdf file. It does some other things that are helpful for my publishing process.
+
+If anyone is actually interested in this just let me know and I will
+gladly go through to clean up and comment the code, write some documentation, and provide support.
+
+
